@@ -33,7 +33,7 @@ void servo_init( void )
 	      ;
 	OCR1A = SERVO_CPU_CYCLES_2048; // Compare match on SERVO_CPU_CYCLES (match triggers interrupt)
 	OCR1C = SERVO_CPU_CYCLES_2048; // Compare match on SERVO_CPU_CYCLES (match causes reset)
-	TIMSK |= _BV(OCIE1A);          // enable interrupt
+//	TIMSK |= _BV(OCIE1A);          // enable interrupt
 
 	// Timer/Counter0 - Generates a pulse on the servo pin (between SERVO_MIN_CPU_CYCLES and SERVO_MAX_CPU_CYCLES)
 	TCCR0A = 0

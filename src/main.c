@@ -13,6 +13,9 @@
 #define SERVUSB_VENDOR_ID  0x16c0
 #define SERVUSB_PRODUCT_ID 0x05df
 
+#define SERVUSB_CONFIGURATION 1
+#define SERVUSB_INTERFACE 0
+
 #define SERVUSB_REPORT_ID_CONTROL 0x01
 #define SERVUSB_REPORT_ID_DATA    0x02
 
@@ -25,6 +28,30 @@
 #define USB_HID_REPORT_TYPE_INPUT   1
 #define USB_HID_REPORT_TYPE_OUTPUT  2
 #define USB_HID_REPORT_TYPE_FEATURE 3
+
+
+static int usb_setFeature( libusb_device_handle * device, unsigned char * data, uint16_t length )
+{
+	int transferred = libusb_control_transfer( device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, // request type
+		USBRQ_HID_SET_REPORT,                                                        // request
+		USB_HID_REPORT_TYPE_FEATURE << 8 | data[0],                                 // value report type|id
+		0,                                                                         // index
+		data, length,
+		1000
+		);
+	if( transferred < 0 )
+	{
+		fprintf( stderr, "Error: Transfer failed: %s (%d)\n", libusb_strerror(transferred), transferred );
+		return transferred;
+	}
+	if( transferred != length )
+	{
+		fprintf( stderr, "Error: Incomplete transfer - sent %d bytes but expected %d\n", transferred, length );
+		return LIBUSB_ERROR_IO;
+	}
+	return transferred;
+}
 
 
 static char doc[] = "This is the ServUSB command line interface - ServUSB is a servo for the Universal Serial Bus.";
@@ -134,12 +161,12 @@ int main( int argc, char ** argv )
 		uint8_t dnum = libusb_get_device_address( dev );
 
 		if( (arguments.bus != -1 && arguments.bus != bnum) || (arguments.dev != -1 && arguments.dev != dnum))
-			continue; // bus and/or device number given and it doesn't match - continue to next device
+			continue; // bus and/or device number given and it doesn't match - continue with next device
 
 		struct libusb_device_descriptor desc;
 		libusb_get_device_descriptor( dev, &desc );
 		if( (desc.idVendor != SERVUSB_VENDOR_ID) || (desc.idProduct != SERVUSB_PRODUCT_ID) )
-			continue; // device is not ServUSB
+			continue; // device is not ServUSB - continue with next device
 
 		arguments.bus = bnum;
 		arguments.dev = dnum;
@@ -161,44 +188,57 @@ int main( int argc, char ** argv )
 		return EXIT_FAILURE;
 	}
 
-	// execute command
+	libusb_detach_kernel_driver( device, SERVUSB_INTERFACE );
+	err = libusb_set_configuration( device, SERVUSB_CONFIGURATION );
+	if( err )
+	{
+		fprintf( stderr, "Warning: Could not set configuration: %s (%d)\n", libusb_strerror(err), err );
+	}
+	err = libusb_claim_interface( device, SERVUSB_INTERFACE );
+	if( err )
+	{
+		fprintf( stderr, "Warning: Could not claim interface: %s (%d)\n", libusb_strerror(err), err );
+	}
+
+	// execute command and exit
+	int transferred;
 	if( arguments.enable )
 	{
 		printf( "Enabling servo on bus %d, device %d and moving into position %d.\n", arguments.bus, arguments.dev, arguments.position );
 		{
 			unsigned char data[2] = { SERVUSB_REPORT_ID_DATA, arguments.position };
-			libusb_control_transfer( device,
-				LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, // request type
-				USBRQ_HID_SET_REPORT,                                                        // request
-				USB_HID_REPORT_TYPE_FEATURE << 8 | data[0],                                 // value report type|id
-				0,                                                                         // index
-				data, sizeof(data),
-				1000
-				);
+			transferred = usb_setFeature( device, data, sizeof(data) );
+			if( transferred < 0 )
+			{
+				fprintf( stderr, "Error: Failed to set position!\n" );
+				libusb_close( device );
+				libusb_exit( ctx );
+				return EXIT_FAILURE;
+			}
 		}
 		{
 			unsigned char data[2] = { SERVUSB_REPORT_ID_CONTROL, SERVUSB_CONTROL_ENABLE_BIT };
-			libusb_control_transfer( device,
-				LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, // request type
-				USBRQ_HID_SET_REPORT,                                                        // request
-				USB_HID_REPORT_TYPE_FEATURE << 8 | data[0],                                 // value report type|id
-				0,                                                                         // index
-				data, sizeof(data),
-				1000
-				);
+			transferred = usb_setFeature( device, data, sizeof(data) );
+			if( transferred < 0 )
+			{
+				fprintf( stderr, "Error: Failed to enable servo!\n" );
+				libusb_close( device );
+				libusb_exit( ctx );
+				return EXIT_FAILURE;
+			}
 		}
 	} else {
 		printf( "Disabling servo on bus %d, device %d.\n", arguments.bus, arguments.dev );
 		{
 			unsigned char data[2] = { SERVUSB_REPORT_ID_CONTROL, 0x00 };
-			libusb_control_transfer( device,
-				LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, // request type
-				USBRQ_HID_SET_REPORT,                                                        // request
-				USB_HID_REPORT_TYPE_FEATURE << 8 | data[0],                                 // value report type|id
-				0,                                                                         // index
-				data, sizeof(data),
-				1000
-				);
+			transferred = usb_setFeature( device, data, sizeof(data) );
+			if( transferred < 0 )
+			{
+				fprintf( stderr, "Error: Failed to disable servo!\n" );
+				libusb_close( device );
+				libusb_exit( ctx );
+				return EXIT_FAILURE;
+			}
 		}
 	}
 

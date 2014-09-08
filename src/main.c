@@ -5,8 +5,7 @@
 #include <stdlib.h>
 
 #include <unistd.h>
-#include <argp.h>
-
+#include <getopt.h>
 #include <libusb.h>
 
 
@@ -54,18 +53,6 @@ static int usb_setFeature( libusb_device_handle * device, unsigned char * data, 
 }
 
 
-static char doc[] = "This is the ServUSB command line interface - ServUSB is a servo for the Universal Serial Bus.";
-
-
-static struct argp_option options[] =
-{
-	{ "select",  's', "[[bus]:][devnum]", 0, "Connect with specified device and/or bus numbers (in decimal) - Otherwise the first found ServUSB device is used." },
-	{ "enable",  'e', "position",         0, "Enable the servo and move to the specified position (0 to 255)." },
-	{ "disable", 'd', 0,                  0, "Disables the servo." },
-	{ 0 }
-};
-
-
 struct arguments
 {
 	int bus;
@@ -75,63 +62,78 @@ struct arguments
 };
 
 
-static error_t parser( int key, char * arg, struct argp_state * state )
+void print_usage( int argc, char ** argv )
 {
-	struct arguments * arguments = state->input;
-
-	switch( key )
-	{
-	case 's':
-	{ // shamelessly stolen from usbutil's lsusb.c ;)
-		char * cp;
-		cp = strchr( arg, ':' );
-		if( cp )
-		{
-			*cp++ = 0;
-			if( *arg )
-				arguments->bus = strtoul( arg, NULL, 10 );
-			if( *cp )
-				arguments->dev = strtoul( cp, NULL, 10 );
-		} else {
-			if( *arg )
-				arguments->dev = strtoul(arg, NULL, 10);
-		}
-		break;
-	}
-	case 'e':
-		arguments->position = atoi( arg );
-		arguments->enable = 1;
-		break;
-	case 'd':
-		arguments->enable = 0;
-		break;
-	case ARGP_KEY_INIT:
-		arguments->bus = -1;
-		arguments->dev = -1;
-		arguments->enable = -1;
-		arguments->position = 127;
-		break;
-	case ARGP_KEY_END:
-		if( arguments->enable < 0 )
-			argp_failure( state, 1, 0, "Need to either enable or disable the servo!" );
-		if( arguments->position < 0 || arguments->position > 255 )
-			argp_failure( state, 1, 0, "Servo position out of range (0-255)!" );
-		break;
-	default:
-		return ARGP_ERR_UNKNOWN;
-	}
-	return 0;
+	printf
+	(
+		"This is the ServUSB command line interface - ServUSB is a servo for the Universal Serial Bus.\n"
+		"Usage: %s [-d] [--disable] [-e position] [--enable=position] [-s [[bus]:][devnum]] [--select=[[bus]:][devnum]]\n",
+		argv[0]
+	);
 }
-
-
-static struct argp argp = { options, parser, NULL, doc };
-
 
 int main( int argc, char ** argv )
 {
 	// argument parsing
 	struct arguments arguments = {0};
-	argp_parse( &argp, argc, argv, 0, 0, &arguments );
+	arguments.bus = -1;
+	arguments.dev = -1;
+	arguments.enable = -1;
+	arguments.position = 127;
+
+	static struct option long_options[] =
+	{
+		{ "disable", no_argument,       0, 'd' },
+		{ "enable",  required_argument, 0, 'e' },
+		{ "select",  required_argument, 0, 's' },
+		{ 0,         0,                 0, 0   }
+	};
+
+	int opt = 0;
+	int option_index = 0;
+	while( ( opt = getopt_long( argc, argv, "de:s:", long_options, &option_index ) ) != -1 )
+	{
+		switch( opt )
+		{
+		case 'd':
+			arguments.enable = 0;
+			break;
+		case 'e':
+			arguments.position = atoi( optarg );
+			arguments.enable = 1;
+			break;
+		case 's':
+		{ // shamelessly stolen from usbutil's lsusb.c ;)
+			char * cp;
+			cp = strchr( optarg, ':' );
+			if( cp )
+			{
+				*cp++ = 0;
+				if( *optarg )
+					arguments.bus = strtoul( optarg, NULL, 10 );
+				if( *cp )
+					arguments.dev = strtoul( cp, NULL, 10 );
+			} else {
+				if( *optarg )
+					arguments.dev = strtoul( optarg, NULL, 10 );
+			}
+			break;
+		}
+		default:
+			print_usage( argc, argv );
+			return EXIT_FAILURE;
+		}
+	}
+	if( arguments.enable < 0 )
+	{
+		fprintf( stderr, "Need to either to enable or disable the servo!\n" );
+		return EXIT_FAILURE;
+	}
+	if( arguments.position < 0 || arguments.position > 255 )
+	{
+		fprintf( stderr, "Servo position out of range (0-255)!\n" );
+		return EXIT_FAILURE;
+	}
 
 	// init libusb
 	int err;
@@ -154,6 +156,7 @@ int main( int argc, char ** argv )
 		libusb_exit( ctx );
 		return EXIT_FAILURE;
 	}
+
 	for( int i = 0; i < num_devs; ++i )
 	{
 		libusb_device * dev = list[i];
@@ -183,7 +186,10 @@ int main( int argc, char ** argv )
 	libusb_free_device_list( list, 0 );
 	if( !device )
 	{
-		fprintf( stderr, "Error: Could not find ServUSB!\n" );
+		if( arguments.dev < 0 && arguments.bus < 0 )
+			fprintf( stderr, "Error: Could not find ServUSB!\n" );
+		else
+			fprintf( stderr, "Error: Could not find ServUSB on bus %d device %d!\n", arguments.bus, arguments.dev );
 		libusb_exit( ctx );
 		return EXIT_FAILURE;
 	}

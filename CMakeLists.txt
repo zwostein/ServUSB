@@ -15,3 +15,19 @@ add_executable( ${EXECUTABLE_NAME}
 target_link_libraries( ${EXECUTABLE_NAME} ${LIBUSB_1_LIBRARIES} )
 
 install(TARGETS ${EXECUTABLE_NAME} DESTINATION bin)
+
+
+################################################################
+# Packaging
+
+set( CPACK_PACKAGE_VERSION "0.1-snapshot" )
+
+if( WIN32 )
+	if( "${CMAKE_SIZEOF_VOID_P}" EQUAL "8" )
+		set( CPACK_SYSTEM_NAME win64 )
+	endif()
+endif()
+
+include( CPack )
+
+################################################################
